@@ -6,7 +6,7 @@
 #' @export
 mangle_cache_path = function(cache_path =  knitr::opts_chunk$get()$cache.path){
     cps = strsplit(cache_path, '[/:\\]')[[1]]
-    if(length(cps != 2)) stop('Expecting rmarkdown cache set up')
+    if(length(cps) != 2) stop('Expecting rmarkdown cache set up')
     cps[[1]] = paste0('~', cps[[1]])
     cps_mangle = do.call(file.path, as.list(cps))
     knitr::opts_chunk$set(cache.path = cps_mangle)
