@@ -15,5 +15,20 @@ heat2 <- function(mat, Rowv=NA, Colv=NA, symbreaks=TRUE, col=if(symbreaks) gplot
 
 lkup <- lookup::lookup
 
+#' Clamp a vector between some modulus
+#'
+#' Replaces all values greater than modulus with modulus and all values lt modulus with -modulus
+#' @param x numeric vector
+#' @param modulus numeric scalar
+#'
+#' @return numeric vector
+#' @export
+#'
+clamp = function(x, modulus = 5){
+    x[x < -modulus] = -modulus
+    x[x> modulus] = modulus
+    x
+}
+
 # add code to strip covariate columns from a data frame and convert to a numeric matrix
 # add code to standardize ggplot themes
