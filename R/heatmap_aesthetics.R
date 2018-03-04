@@ -47,6 +47,6 @@ am_default_col = function (x, main_matrix = FALSE) {
 #' @importFrom stats quantile runif
 #' @importFrom utils assignInNamespace
 set_AM_heatmap_defaults = function(){
-    assignInNamespace('default_col', am_default_col, 'package:ComplexHeatmap')
+    assignInNamespace('default_col', am_default_col, 'ComplexHeatmap')
 
 }
