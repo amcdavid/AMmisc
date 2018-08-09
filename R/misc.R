@@ -17,7 +17,8 @@ lkup <- lookup::lookup
 
 #' Clamp a vector between some modulus
 #'
-#' Replaces all values greater than modulus with modulus and all values lt modulus with -modulus
+#' Replaces all values greater than modulus with modulus and all values lt modulus with -modulus.
+#' Also known as winsorization.
 #' @param x numeric vector
 #' @param modulus numeric scalar
 #'
@@ -32,3 +33,22 @@ clamp = function(x, modulus = 5){
 
 # add code to strip covariate columns from a data frame and convert to a numeric matrix
 # add code to standardize ggplot themes
+
+#' Largest elements in norm from a matrix
+#'
+#' The \code{top} largest rows in norm from \code{x} are retained.
+#' Others are set to zero or removed (\code{remove_zero})
+#' @param x numeric matrix
+#' @param top number of top elements
+#' @param remove_zero \code{logical}
+#' @param p Coefficient `p` of the L_p norm
+purify = function(x, top = floor(.1*nrow(x)), remove_zero = FALSE, p = 2){
+    row_norm = rowSums(x^p)^(1/p)
+    row_rank = rank(-row_norm, na.last = FALSE, ties.method = 'first')
+    if(remove_zero){
+    x = x[row_rank <= top,]
+    } else{
+     x[row_rank <= top,] = 0
+    }
+    return(x)
+}

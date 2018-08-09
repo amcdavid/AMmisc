@@ -19,3 +19,4 @@ Suggests: gplots,
     circlize,
     ComplexHeatmap (>= 1.14.0)
 RoxygenNote: 6.0.1
+remotes: jimhester/lookup
