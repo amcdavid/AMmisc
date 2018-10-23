@@ -1,7 +1,7 @@
 Package: AMmisc
 Type: Package
 Title: Miscellaneous Functions, Templates and Tools
-Version: 0.1.0
+Version: 0.2.0
 Author: Andrew McDavid
 Maintainer: Andrew McDavid <andrew.n.mcdavid@gmail.com>
 Description: Miscellaneous R functions mainly for interactive use and for setting plot and knitr report aesthetics.

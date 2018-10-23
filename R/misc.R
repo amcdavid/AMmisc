@@ -13,7 +13,10 @@ heat2 <- function(mat, Rowv=NA, Colv=NA, symbreaks=TRUE, col=if(symbreaks) gplot
     gplots::heatmap.2(mat, trace='none', scale='none', Rowv=Rowv, Colv=Colv, symbreaks=symbreaks, col=col, ...)
 }
 
-lkup <- lookup::lookup
+if(requireNamespace('lookup')){
+    lkup <<- lookup::lookup
+    detachNamespace('lookup')
+}
 
 #' Clamp a vector between some modulus
 #'
