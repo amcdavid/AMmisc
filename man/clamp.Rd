@@ -15,5 +15,6 @@ clamp(x, modulus = 5)
 numeric vector
 }
 \description{
-Replaces all values greater than modulus with modulus and all values lt modulus with -modulus
+Replaces all values greater than modulus with modulus and all values lt modulus with -modulus.
+Also known as winsorization.
 }

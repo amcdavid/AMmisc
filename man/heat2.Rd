@@ -4,8 +4,14 @@
 \alias{heat2}
 \title{A quick and dirty heatmap}
 \usage{
-heat2(mat, Rowv = NA, Colv = NA, symbreaks = TRUE, col = if (symbreaks)
-  gplots::redblue else gplots::redgreen, ...)
+heat2(
+  mat,
+  Rowv = NA,
+  Colv = NA,
+  symbreaks = TRUE,
+  col = if (symbreaks) gplots::redblue else gplots::redgreen,
+  ...
+)
 }
 \arguments{
 \item{mat}{numeric matrix}

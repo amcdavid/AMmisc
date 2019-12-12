@@ -1,0 +1,348 @@
+---
+title: "scRNAseq cluster analysis"
+author: "Andrew McDavid"
+date: '`r Sys.Date()`'
+output:
+  html_document:
+    code_folding: hide
+    toc: yes
+    toc_float: yes
+  slidy_presentation:
+    font_adjustment: +1
+extensions: inline_footnotes
+---
+
+
+# Libraries
+
+```{r library, message = FALSE, warning = FALSE, results = 'hide'}
+knitr::opts_chunk$set(echo = TRUE, cache=TRUE, autodep=TRUE, message=FALSE, warning=FALSE)
+knitr::opts_chunk$set(dev = c('png', 'pdf'))
+library(broom)
+library(ggbeeswarm)
+library(AMmisc) # devtools::install_github('amcdavid/AMmisc')
+
+library(SingleCellExperiment)
+library(scater)
+library(tidyverse)
+library(ggrepel)
+VDJ = FALSE
+```
+
+# Load data
+
+```{r fileset_metadata}
+pipestance_all = list.files('deliv_Anolik_042318_cellRanger_only_filtered/', full.names = TRUE, recursive = TRUE, pattern = 'genes.tsv') %>% str_split('/+', simplify = TRUE)
+
+bases = pipestance_all[,2]
+pipestance = apply(pipestance_all[,-6], 1, function(x) do.call(file.path, as.list(x)))
+
+samp_map = data_frame(anno_file = pipestance, sample = str_match(bases, 'Sample_(RA[0-9]+)')[,2], pop = str_match(bases, '(Syn|SYN|BLD)')[,1] %>% toupper(), fileset = seq_along(pipestance), dataset = paste(sample, pop, sep = "_"))
+names(pipestance) = samp_map$dataset
+```
+
+```{r filterset}
+#these are also in alphabetical order, per Nida
+
+barcodes = read_csv('refined/nida_livecells_barcodes.csv', skip = 5) %>% mutate(barcode = str_replace_all(CellId, '[0-9]_', ''), fileset = as.integer(str_extract(CellId, '^[0-9]'))) %>% left_join(samp_map)
+```
+
+```{r vdj, eval = VDJ}
+paired_table = read_csv('refined/paired_chain_barcodes.csv') %>% full_join(barcodes) %>% mutate(chain_type = str_replace_all(chain_type, 'GK|GL', 'Glite'), chain_expr_type = case_when(is.na(CellId) ~ chain_type, is.na(chain_type) ~ "5'", TRUE ~ str_c(chain_type, "_5'")))
+
+heavy_table = read_csv('refined/heavy_chain_clustered.csv') %>% select(cluster_idx, len, query_idx, barcode, dataset, length:c_gene, cdr3, umis, celltype, class:cdr3_length) %>% arrange(dataset, barcode, desc(umis))
+heavy_table_uniq = heavy_table[!duplicated(heavy_table %>% select(dataset, barcode)),]
+```
+
+```{r results = 'asis', eval = VDJ}
+knitr::kable(paired_table %>% group_by(dataset, chain_expr_type) %>% summarize(ncells = n()) %>% spread(key = chain_expr_type, value = ncells, fill = 0))
+```
+
+```{r read10X}
+MIN_EXP_FREQ = .003
+
+all_res = DropletUtils::read10xCounts(samples = unname(pipestance))
+colData(all_res)$idx = seq_len(ncol(all_res))
+cd = merge(colData(all_res), samp_map %>% rename(Sample = anno_file), all.x = TRUE)
+cd$barcode = cd$Barcode
+cd$sample = cd$dataset
+cd = merge(cd, heavy_table_uniq, all.x = TRUE) %>% as.data.frame
+cd = cd %>% group_by(cluster_idx) %>% summarize(cluster_size = n()) %>% left_join(cd) %>% mutate(cluster_size = ifelse(is.na(cluster_idx), NA, cluster_size))
+colData(all_res) = cd[order(cd$idx),] %>% as.data.frame() %>% DataFrame()
+```
+
+
+```{r}
+sce = all_res[,paste(colData(all_res)$dataset, colData(all_res)$barcode, sep = '_') %in%
+                  (barcodes %>% transmute( key = str_c(sample, pop, barcode, sep = '_')) %>% .[[1]]) ]
+sce = sce[Matrix::rowMeans(assay(sce) > 0) > MIN_EXP_FREQ,]
+rowData(sce)$symbol = rowData(sce)$Symbol
+rownames(sce) = make.unique(rowData(sce)$symbol)
+
+```
+
+```{r gene_whitelist}
+gene_whitelist = tribble(~symbol, ~group,
+        "ITGAX", "ABC",
+        "TBX21", "ABC",
+        "CD27", "Plasma",
+        "IGHG3", "Plasma",
+        "MS4A1", "Naive",
+        "FCRL4", "ABC",
+        'IGHD', 'Naive',
+        'XBP1', 'Plasma',
+        'CR2', 'Naive',
+        'AICDA', 'ABC' #not present at 1%
+        )
+rowData(sce)$idx = seq_len(nrow(sce))
+rd = merge(rowData(sce), gene_whitelist, all.x = TRUE)
+rowData(sce) = rd[order(rd$idx),]
+```
+
+# Normalize
+
+```{r sizeFactors}
+qc = scran::quickCluster(sce, method = 'igraph')
+sce = scran::computeSumFactors(sce, cluster = qc)
+summary(sizeFactors(sce))
+sum(sizeFactors(sce)<0)
+```
+
+```{r normalize}
+qc = qc[sizeFactors(sce)>0]
+sce = normalise(sce[,sizeFactors(sce)>0])
+plt = qplot(x = sizeFactors(sce), y = Matrix::colSums(assay(sce, 'counts')), color = factor(qc)) + geom_smooth() 
+plt + ylab('Library size (sum)')
+plt + aes(y = Matrix::colSums(assay(sce, 'counts') > 0)) + ylab('CDR')
+
+```
+
+
+# QC
+
+```{r calcqc}
+mito = rowData(sce)$symbol %>% str_detect('MT-')
+sce = calculateQCMetrics(sce, feature_controls = list(mito = mito))
+```
+
+# Highly variable genes
+
+```{r trendvar}
+fit.g = scran::trendVar(sce, use.spikes = FALSE, parametric = TRUE)
+dec = scran::decomposeVar(sce, fit.g) %>% as.data.frame() %>% mutate(rank = rank(-bio/total))
+ggplot(dec, aes(x = rank, y = p.value)) + geom_point()
+rowData(sce) = cbind(dec, rowData(sce))
+
+
+trendvar_tidy = rowData(sce) %>% as.data.frame %>% mutate(trend = fit.g$trend(mean), cut_mean = cut(mean, 5)) %>% group_by(cut_mean) %>% mutate(rank_by_mean = rank(-bio/total))
+
+ggplot(trendvar_tidy, aes(x = sqrt(mean), y = total))+geom_point() + geom_line(aes(y = trend), color = 'red') + geom_text_repel(aes(label = ifelse(rank_by_mean<20, symbol, '')), size = 2) + theme_minimal()
+```
+
+```{r hvg}
+rowData(sce)$hvg = dec$rank<3000 | !is.na(rowData(sce)$group)
+```
+
+
+# PCA
+
+```{r pca}
+PCA_COMPONENTS = 15
+
+sce = runPCA(sce, ntop = Inf, ncomponents = PCA_COMPONENTS, feature_set = rowData(sce)$hvg)
+
+plotPCA(sce, ncomponents = 4, colour_by = 'dataset')
+plotPCA(sce, ncomponents = 4, colour_by = 'total_features')
+
+
+plt = plotReducedDim(sce, use_dimred = 'PCA', ncomponents = 2, colour_by = 'dataset') + geom_point(size = .5, aes(color = colour_by))
+
+plt + facet_wrap(~colour_by)
+
+
+
+var = cumsum(attr(reducedDim(sce, 'PCA'), 'percentVar'))
+qplot(x = seq_along(var), y = var) + geom_line() + scale_x_log10() + ylab('Proportion of variance') + xlab('Index') + theme_minimal()
+```
+
+
+```{r run_tsne}
+sce = runTSNE(sce, use_dimred = 'PCA', n_dimred = PCA_COMPONENTS, rand_seed = 1234)
+```
+
+
+```{r cluster}
+N_CLUSTER = 6
+set.seed(1234)
+colData(sce)$cluster_id = kmeans(reducedDim(sce, 'PCA'), centers=N_CLUSTER, nstart = 20)$cluster %>% factor
+contrasts(colData(sce)$cluster_id) = 'contr.sum'
+```
+
+```{r plotTSNE}
+plt = plotTSNE(sce, colour_by = 'cluster_id', shape_by = 'dataset') 
+plt
+plotTSNE(sce, colour_by = 'cluster_id', shape_by = 'dataset') + facet_wrap(~shape_by)
+
+generate_rd_plot = function(sce, use_dimred, covariates){
+    reducedDim(sce, use_dimred)[,1:2] %>% cbind(colData(sce), assay(sce, 'logcounts')[covariates,] %>% as.matrix %>% t) %>% as.data.frame
+}
+
+plotTSNE(sce, colour_by = 'total_features')
+
+
+tsne_plot = generate_rd_plot(sce, 'TSNE', gene_whitelist$symbol) %>% select(V1, V2, ITGAX:AICDA) %>% gather(symbol, logcounts, c(-V1, -V2))
+
+ggplot(tsne_plot, aes(x = V1, y = V2, color = clamp(logcounts, 4), alpha = clamp(logcounts + .5, 1)))+ geom_point(size = 1, show.legend = FALSE) + facet_wrap(~symbol) + theme_void() + scale_color_distiller('log counts', type = 'seq', palette = 'Greens', direction = 1)
+
+
+
+tsne_plot = generate_rd_plot(sce, 'TSNE', gene_whitelist$symbol) %>% mutate(cluster_idx = ifelse(cluster_size < 10, NA, cluster_idx) %>% factor)
+
+ggplot(tsne_plot, aes(x = V1, y = V2, color = cluster_idx, alpha = cluster_size)) + geom_point(size = 1) + theme_void()
+
+
+```
+
+# Seurat
+
+```{r seurat}
+foo = assays(sce) %>% lapply(as.matrix)
+colnames(foo$counts) = paste(colData(sce)$sample, colData(sce)$barcode, sep = '_')
+#ssce = sce
+#assays(ssce) = foo
+#ssce = Seurat::Convert(ssce, to = 'seurat')
+ssce = Seurat::CreateSeuratObject(raw.data = foo$counts, meta.data = colData(sce) %>% as.data.frame)
+ssce = Seurat::NormalizeData(ssce)
+
+```
+
+```{r seurat_hvg}
+ssce = Seurat::FindVariableGenes(ssce, do.plot = TRUE, y.cutoff = 0.5)
+```
+
+There are `r length(ssce@var.genes)`
+
+```{r seurat_pca}
+ssce = Seurat::ScaleData(ssce, display.progress = FALSE, genes.use = ssce@var.genes)
+ssce = Seurat::RunPCA(ssce, pcs.print = 0, pcs.compute = 30)
+Seurat::PCElbowPlot(ssce, num.pc = 30)
+
+ssce =  Seurat::JackStraw(object = ssce, display.progress = TRUE, num.replicate = 100, do.par = TRUE, num.cores = 3, maxit = 500)
+Seurat::JackStrawPlot(ssce, PCs = 1:20)
+
+Seurat::PCHeatmap(ssce, pc.use = c(1:5, 20), cells.use = 500)
+Seurat::VizPCA(object = ssce, pcs.use = 1:6, nCol = 3)
+```
+
+```{r seurat_cluster}
+ssce = Seurat::FindClusters(ssce, dims.use = 1:PCA_COMPONENTS, print.output = FALSE, plot.SNN = TRUE, k.param = 50)
+ssce = Seurat::RunTSNE(ssce, dims.use = 1:PCA_COMPONENTS, perplexity = 20)
+Seurat::TSNEPlot(ssce, do.label = FALSE, pt.size = 0.5)
+
+```
+
+```{r seurat_label}
+s_mark = Seurat::FindAllMarkers(ssce, max.cells.per.ident = 100, logfc.threshold = log(2), 
+    only.pos = TRUE, min.diff.pct = 0.3, do.print = F)
+
+top10 = s_mark %>% group_by(cluster) %>% top_n(10, avg_logFC)
+top10 = s_mark %>% group_by(cluster) %>% top_n(10, p_val_adj)
+
+# setting slim.col.label to TRUE will print just the cluster IDS instead of
+# every cell name
+Seurat::DoHeatmap(object = ssce, genes.use = unique(top10$gene), slim.col.label = TRUE, remove.key = TRUE) + theme(axis.text.y = element_text(size = 6))
+
+```
+
+# Cluster tests
+
+```{r MAST_setup}
+options(mc.cores = 4)
+library(MAST)
+sca = FromMatrix(assay(sce, 'logcounts') %>% as.matrix(), cData = colData(sce), fData = rowData(sce))
+named_to_df = function(x) data_frame('Pr(>Chisq)' = x, primerid = names(x))
+```
+
+```{r clusterTests, eval = FALSE}
+
+zz_cluster = zlm(~cluster_id, sca = sca, method = 'bayesglm')
+hurdle_p = vector('list', length = N_CLUSTER)
+names(hurdle_p) = str_c('cluster_id', seq_len(N_CLUSTER))
+for(i in seq_len(N_CLUSTER-1)){
+    hurdle_p[[i]] = waldTest(zz_cluster, CoefficientHypothesis(str_c('cluster_id', i)))[,3,3] %>% named_to_df
+}
+
+h1 = paste(str_c('-1*', 'cluster_id', seq_len(N_CLUSTER-1)), collapse = '+')
+hurdle_p[[N_CLUSTER]] = waldTest(zz_cluster, Hypothesis(h1))[,3,3] %>% named_to_df
+cluster_p_all = hurdle_p %>% bind_rows(.id = 'contrast')
+```
+
+```{r, eval = FALSE}
+cluster_p_all = cluster_p_all %>% group_by(contrast) %>% mutate(rank = rank(`Pr(>Chisq)`)) 
+
+cluster_genes = cluster_p_all %>% dplyr::filter(rank<20) %>% ungroup() %>% select(primerid)
+
+cluster_p = left_join(cluster_p_all, cluster_genes) %>% reshape2::dcast(primerid ~ contrast, value.var = 'Pr(>Chisq)')
+
+
+
+```
+
+# Differential expression
+
+```{r setupTests}
+
+colData(sca) = cbind(colData(sca), assay(sca)[!is.na(rowData(sca)$group),] %>% as.matrix %>% t)
+tbx = factor(colData(sca)$TBX21>0, labels = c('TBX21-', 'TBX21+'))
+itgax = factor(colData(sca)$ITGAX>0, labels = c('ITGAX-', 'ITGAX+'))
+colData(sca)$grp = interaction(tbx, itgax)
+
+plt = ggplot(colData(sca) %>% as.data.frame(), aes(x = dataset, fill = grp))+geom_bar() + theme_minimal()+  scale_fill_brewer(type = 'qual', palette = 'Set1') + coord_flip()
+plt
+plt + facet_wrap(~cluster_id)
+
+```
+
+```{r, results = 'asis'}
+knitr::kable(table(dataset = colData(sce)$dataset, colData(sca)$grp) )
+```
+
+```{r runTests}
+zz = zlm(~grp + total_features, sca = sca, method = 'bayesglm', parallel = TRUE)
+dt = summary(zz, doLRT = c('grpTBX21+.ITGAX+', 'grpTBX21+.ITGAX-', 'grpTBX21-.ITGAX+'))$datatable %>% as_tibble()
+```
+
+
+```{r showTests}
+library(ggrepel)
+contrasts = dt %>% dplyr::filter(str_detect(contrast, 'grp'), component == 'H') %>% mutate(fdr = p.adjust(`Pr(>Chisq)`, method = 'fdr'))
+
+sig = dplyr::filter(contrasts, fdr < .1, primerid != 'TBX21', primerid != 'ITGAX')
+
+
+with_hurdle = dt %>% dplyr::filter(component == 'logFC') %>% right_join( (contrasts %>% semi_join(sig %>% select(primerid))) %>% select(primerid, contrast, fdr))
+
+with_hurdle = with_hurdle %>% group_by(contrast) %>% mutate(primerid_rank = rank(fdr))
+
+ggplot(with_hurdle, aes(x = coef, y = -log10(fdr), label = ifelse(primerid_rank < 30, primerid, '')))+ geom_point(size = 1) + theme_minimal() + facet_wrap(~contrast) + geom_text_repel(size = 2, segment.alpha = .25) + scale_colour_brewer(type = 'qual', palette = 2) + xlab('logFC(Group:Baseline)')
+
+```
+
+```{r}
+sig %>% group_by(contrast) %>% summarize(n())
+```
+
+# Split clones
+
+```{r}
+cdr_clusters = colData(sce) %>% as.data.frame()  %>% group_by(cluster_idx) %>% summarize(count = n(), n_cluster_id = length(unique(cluster_id))) 
+
+split_cluster = cdr_clusters %>% dplyr::filter(cluster_idx != 0, #this is a catch-all
+                        count > 2,
+                        n_cluster_id > 1)
+                                                                
+cdr_cluster2 = colData(sce) %>% as.data.frame() %>% select(Barcode:cdr3_length, cluster_idx, cluster_id) %>% right_join(split_cluster)
+
+cdr_cluster2 %>% with(., table(cluster_idx, cluster_id))
+ggplot(cdr_cluster2, aes(x = factor(cluster_idx), fill = cluster_id)) + geom_bar() + coord_flip()
+```
