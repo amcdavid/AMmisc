@@ -13,7 +13,7 @@ purify(x, top = floor(0.1 * nrow(x)), remove_zero = FALSE, p = 2)
 
 \item{remove_zero}{\code{logical}}
 
-\item{p}{Coefficient `p` of the L_p norm}
+\item{p}{Coefficient \code{p} of the L_p norm}
 }
 \description{
 The \code{top} largest rows in norm from \code{x} are retained.

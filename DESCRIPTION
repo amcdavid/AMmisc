@@ -1,7 +1,7 @@
 Package: AMmisc
 Type: Package
 Title: Miscellaneous Functions, Templates and Tools
-Version: 0.2.1
+Version: 0.2.2
 Author: Andrew McDavid
 Maintainer: Andrew McDavid <andrew.n.mcdavid@gmail.com>
 Description: Miscellaneous R functions mainly for interactive use and for setting plot and knitr report aesthetics.
@@ -18,6 +18,12 @@ Suggests: gplots,
     lookup,
     RColorBrewer,
     circlize,
-    ComplexHeatmap (>= 1.14.0)
-RoxygenNote: 7.0.1
+    ComplexHeatmap (>= 1.14.0),
+    fgsea, 
+    ggplot2, 
+    purrr,
+    plyr,
+    dplyr
+RoxygenNote: 7.1.0
 remotes: jimhester/lookup
+Roxygen: list(markdown = TRUE)

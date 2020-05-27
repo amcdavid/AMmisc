@@ -18,9 +18,9 @@ fisher_corr(x, y, conf.level = 0.95, ..., method = "fisher")
 )
 }
 \arguments{
-\item{x}{`AMcorr`}
+\item{x}{\code{AMcorr}}
 
-\item{y}{numeric matrix-like object. If missing `y=x`.}
+\item{y}{numeric matrix-like object. If missing \code{y=x}.}
 
 \item{conf.level}{numeric confidence level}
 
@@ -34,12 +34,12 @@ fisher_corr(x, y, conf.level = 0.95, ..., method = "fisher")
 
 \item{include_ci}{include upper/lower CI?}
 
-\item{include_pstar}{include pvalue asterix (set according to `pstar_levels`)}
+\item{include_pstar}{include pvalue asterix (set according to \code{pstar_levels})}
 
 \item{pstar_levels}{named numeric vector determining pvalue formatting}
 }
 \value{
-structure containing correlation matrix, `lr`, `ur` lower and upper CI, the pvalues from the associated tests `pz` and the degrees of freedom `dof`.
+structure containing correlation matrix, \code{lr}, \code{ur} lower and upper CI, the pvalues from the associated tests \code{pz} and the degrees of freedom \code{dof}.
 
 character matrix
 }
